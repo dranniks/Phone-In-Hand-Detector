@@ -34,6 +34,15 @@ class OverlayView @JvmOverloads constructor(
         textSize = 36f
         strokeWidth = 1f
     }
+    private val posePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.rgb(255, 235, 59)
+    }
+    private val poseLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 4f
+        color = Color.rgb(255, 235, 59)
+    }
 
     fun submitAnalysis(value: PhoneAnalysis?) {
         analysis = value
@@ -54,6 +63,26 @@ class OverlayView @JvmOverloads constructor(
         value.phone?.let {
             drawBox(canvas, it, scaleX, scaleY, phonePaint, "phone ${(it.score * 100).toInt()}%")
         }
+        value.handPose?.let {
+            drawArm(canvas, it.leftArm, scaleX, scaleY)
+            drawArm(canvas, it.rightArm, scaleX, scaleY)
+        }
+    }
+
+    private fun drawArm(canvas: Canvas, arm: ArmPose, scaleX: Float, scaleY: Float) {
+        drawSegment(canvas, arm.shoulder, arm.elbow, scaleX, scaleY)
+        drawSegment(canvas, arm.elbow, arm.wrist, scaleX, scaleY)
+        listOfNotNull(arm.shoulder, arm.elbow, arm.wrist)
+            .filter { it.confidence >= 0.35f }
+            .forEach {
+                canvas.drawCircle(it.x * scaleX, it.y * scaleY, 8f, posePaint)
+            }
+    }
+
+    private fun drawSegment(canvas: Canvas, a: PosePoint?, b: PosePoint?, scaleX: Float, scaleY: Float) {
+        if (a == null || b == null) return
+        if (a.confidence < 0.35f || b.confidence < 0.35f) return
+        canvas.drawLine(a.x * scaleX, a.y * scaleY, b.x * scaleX, b.y * scaleY, poseLinePaint)
     }
 
     private fun drawBox(

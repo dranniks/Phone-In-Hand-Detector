@@ -4,6 +4,7 @@ import android.graphics.RectF
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sqrt
 
 class PhoneInHandAnalyzer {
     private var positiveStreak = 0
@@ -12,6 +13,7 @@ class PhoneInHandAnalyzer {
 
     fun analyze(
         detections: List<DetectionBox>,
+        handPose: HandPose?,
         inferenceTimeMs: Long,
         imageWidth: Int,
         imageHeight: Int
@@ -34,16 +36,19 @@ class PhoneInHandAnalyzer {
                 phone = null,
                 person = null,
                 confidence = 0f,
-                reason = "Телефон не обнаружен",
+                reason = "No phone detected",
                 inferenceTimeMs = inferenceTimeMs,
                 imageWidth = imageWidth,
                 imageHeight = imageHeight,
+                handPose = handPose,
                 allDetections = detections
             )
         }
 
         val linkedPerson = people.maxByOrNull { personAssociationScore(phone.rect, it.rect) }
-        val rawInHand = linkedPerson != null && isPhoneInHandZone(phone.rect, linkedPerson.rect)
+        val poseContact = handPose?.let { isPhoneNearPoseHands(phone.rect, it, linkedPerson) } ?: false
+        val fallbackContact = linkedPerson != null && isPhoneInHandZone(phone.rect, linkedPerson.rect)
+        val rawInHand = poseContact || (handPose == null && fallbackContact)
 
         if (rawInHand) {
             positiveStreak++
@@ -61,9 +66,17 @@ class PhoneInHandAnalyzer {
         lastState = smoothedState
 
         val reason = when (smoothedState) {
-            PhoneState.PHONE_IN_HAND -> "Телефон связан с областью рук человека"
-            PhoneState.PHONE_VISIBLE -> "Телефон найден, связь с руками не подтверждена"
-            PhoneState.NO_PHONE -> "Телефон не обнаружен"
+            PhoneState.PHONE_IN_HAND -> if (poseContact) {
+                "Phone is close to wrist or forearm landmarks"
+            } else {
+                "Phone is in a plausible hand zone"
+            }
+            PhoneState.PHONE_VISIBLE -> if (handPose == null) {
+                "Phone found, pose landmarks are not visible"
+            } else {
+                "Phone found, but it is not close to hands"
+            }
+            PhoneState.NO_PHONE -> "No phone detected"
         }
 
         return PhoneAnalysis(
@@ -75,6 +88,7 @@ class PhoneInHandAnalyzer {
             inferenceTimeMs = inferenceTimeMs,
             imageWidth = imageWidth,
             imageHeight = imageHeight,
+            handPose = handPose,
             allDetections = detections
         )
     }
@@ -104,6 +118,27 @@ class PhoneInHandAnalyzer {
         return insideExpandedPerson && plausibleArmHeight && (nearBodySide || centralTorso || overlapRatio > 0.35f)
     }
 
+    private fun isPhoneNearPoseHands(phone: RectF, handPose: HandPose, person: DetectionBox?): Boolean {
+        val phoneSize = max(phone.width(), phone.height()).coerceAtLeast(1f)
+        val personWidth = person?.rect?.width()?.coerceAtLeast(1f) ?: phoneSize * 4f
+        val wristThreshold = max(phoneSize * 1.35f, personWidth * 0.10f).coerceAtLeast(34f)
+        val segmentThreshold = max(phoneSize * 1.15f, personWidth * 0.085f).coerceAtLeast(30f)
+        val expandedPhone = expanded(phone, 0.65f)
+
+        val wristContact = handPose.wristPoints.any { wrist ->
+            wrist.confidence >= MIN_LANDMARK_CONFIDENCE &&
+                (expandedPhone.contains(wrist.x, wrist.y) || distanceToRect(wrist, phone) <= wristThreshold)
+        }
+        if (wristContact) return true
+
+        val phoneCenter = PosePoint(phone.centerX(), phone.centerY(), 1f)
+        return handPose.armSegments.any { (a, b) ->
+            a.confidence >= MIN_LANDMARK_CONFIDENCE &&
+                b.confidence >= MIN_LANDMARK_CONFIDENCE &&
+                distancePointToSegment(phoneCenter, a, b) <= segmentThreshold
+        }
+    }
+
     private fun personAssociationScore(phone: RectF, person: RectF): Float {
         val centerDistance = abs(phone.centerX() - person.centerX()) / person.width().coerceAtLeast(1f) +
             abs(phone.centerY() - person.centerY()) / person.height().coerceAtLeast(1f)
@@ -123,5 +158,40 @@ class PhoneInHandAnalyzer {
         val right = min(a.right, b.right)
         val bottom = min(a.bottom, b.bottom)
         return max(0f, right - left) * max(0f, bottom - top)
+    }
+
+    private fun distanceToRect(point: PosePoint, rect: RectF): Float {
+        val dx = when {
+            point.x < rect.left -> rect.left - point.x
+            point.x > rect.right -> point.x - rect.right
+            else -> 0f
+        }
+        val dy = when {
+            point.y < rect.top -> rect.top - point.y
+            point.y > rect.bottom -> point.y - rect.bottom
+            else -> 0f
+        }
+        return sqrt(dx * dx + dy * dy)
+    }
+
+    private fun distancePointToSegment(point: PosePoint, start: PosePoint, end: PosePoint): Float {
+        val dx = end.x - start.x
+        val dy = end.y - start.y
+        if (dx == 0f && dy == 0f) return distance(point, start)
+
+        val t = (((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy))
+            .coerceIn(0f, 1f)
+        val projection = PosePoint(start.x + t * dx, start.y + t * dy, 1f)
+        return distance(point, projection)
+    }
+
+    private fun distance(a: PosePoint, b: PosePoint): Float {
+        val dx = a.x - b.x
+        val dy = a.y - b.y
+        return sqrt(dx * dx + dy * dy)
+    }
+
+    companion object {
+        private const val MIN_LANDMARK_CONFIDENCE = 0.35f
     }
 }

@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Matrix
 import android.os.Bundle
 import android.view.Gravity
 import android.view.ViewGroup
@@ -19,14 +20,20 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
-import org.tensorflow.lite.support.image.ImageProcessor
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.pose.Pose
+import com.google.mlkit.vision.pose.PoseDetection
+import com.google.mlkit.vision.pose.PoseDetector
+import com.google.mlkit.vision.pose.PoseLandmark
+import com.google.mlkit.vision.pose.defaults.PoseDetectorOptions
 import org.tensorflow.lite.support.image.TensorImage
-import org.tensorflow.lite.support.image.ops.Rot90Op
 import org.tensorflow.lite.task.core.BaseOptions
 import org.tensorflow.lite.task.vision.detector.Detection
 import org.tensorflow.lite.task.vision.detector.ObjectDetector
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
     private lateinit var previewView: PreviewView
@@ -36,6 +43,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var cameraExecutor: ExecutorService
 
     private var objectDetector: ObjectDetector? = null
+    private var poseDetector: PoseDetector? = null
     private var bitmapBuffer: Bitmap? = null
     private val analyzer = PhoneInHandAnalyzer()
 
@@ -49,7 +57,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         cameraExecutor = Executors.newSingleThreadExecutor()
         setContentView(createContentView())
-        setupDetector()
+        setupModels()
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             startCamera()
@@ -62,6 +70,7 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         cameraExecutor.shutdown()
         objectDetector?.close()
+        poseDetector?.close()
     }
 
     private fun createContentView(): ViewGroup {
@@ -90,11 +99,11 @@ class MainActivity : ComponentActivity() {
         )
 
         statusText = TextView(this).apply {
-            text = "Инициализация камеры"
+            text = "Starting camera"
             setTextColor(Color.WHITE)
             textSize = 18f
             gravity = Gravity.CENTER
-            setBackgroundResource(ru.bmstu.tmm.phoneinhand.R.drawable.status_panel)
+            setBackgroundResource(R.drawable.status_panel)
         }
         val statusParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
@@ -106,11 +115,11 @@ class MainActivity : ComponentActivity() {
         root.addView(statusText, statusParams)
 
         metricsText = TextView(this).apply {
-            text = "FPS: -- | Inference: --"
+            text = "Inference: -- | confidence: --"
             setTextColor(Color.WHITE)
             textSize = 14f
             gravity = Gravity.CENTER
-            setBackgroundResource(ru.bmstu.tmm.phoneinhand.R.drawable.status_panel)
+            setBackgroundResource(R.drawable.status_panel)
         }
         val metricsParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -124,11 +133,10 @@ class MainActivity : ComponentActivity() {
         return root
     }
 
-    private fun setupDetector() {
+    private fun setupModels() {
         try {
-            val baseOptionsBuilder = BaseOptions.builder().setNumThreads(4)
-            val options = ObjectDetector.ObjectDetectorOptions.builder()
-                .setBaseOptions(baseOptionsBuilder.build())
+            val objectOptions = ObjectDetector.ObjectDetectorOptions.builder()
+                .setBaseOptions(BaseOptions.builder().setNumThreads(4).build())
                 .setScoreThreshold(0.35f)
                 .setMaxResults(8)
                 .build()
@@ -136,10 +144,15 @@ class MainActivity : ComponentActivity() {
             objectDetector = ObjectDetector.createFromFileAndOptions(
                 this,
                 MODEL_NAME,
-                options
+                objectOptions
             )
+
+            val poseOptions = PoseDetectorOptions.Builder()
+                .setDetectorMode(PoseDetectorOptions.STREAM_MODE)
+                .build()
+            poseDetector = PoseDetection.getClient(poseOptions)
         } catch (error: Exception) {
-            statusText.text = "Ошибка модели: ${error.message}"
+            statusText.text = "Model error: ${error.message}"
         }
     }
 
@@ -190,21 +203,25 @@ class MainActivity : ComponentActivity() {
         }
 
         try {
-            val processor = ImageProcessor.Builder()
-                .add(Rot90Op(-rotation / 90))
-                .build()
-            val tensorImage = processor.process(TensorImage.fromBitmap(bitmap))
+            val orientedBitmap = bitmap.rotate(rotation)
+            val tensorImage = TensorImage.fromBitmap(orientedBitmap)
 
             val started = System.currentTimeMillis()
-            val results = detector.detect(tensorImage)
+            val objectResults = detector.detect(tensorImage)
+            val handPose = detectPose(orientedBitmap)
             val inferenceTime = System.currentTimeMillis() - started
-            val boxes = results.toDetectionBoxes()
+
             val analysis = analyzer.analyze(
-                detections = boxes,
+                detections = objectResults.toDetectionBoxes(),
+                handPose = handPose,
                 inferenceTimeMs = inferenceTime,
                 imageWidth = tensorImage.width,
                 imageHeight = tensorImage.height
             )
+
+            if (orientedBitmap !== bitmap) {
+                orientedBitmap.recycle()
+            }
 
             runOnUiThread {
                 overlayView.submitAnalysis(analysis)
@@ -212,9 +229,47 @@ class MainActivity : ComponentActivity() {
             }
         } catch (error: Exception) {
             runOnUiThread {
-                statusText.text = "Ошибка анализа: ${error.message}"
+                statusText.text = "Analysis error: ${error.message}"
             }
         }
+    }
+
+    private fun detectPose(bitmap: Bitmap): HandPose? {
+        val detector = poseDetector ?: return null
+        return try {
+            val pose = Tasks.await(
+                detector.process(InputImage.fromBitmap(bitmap, 0)),
+                POSE_TIMEOUT_MS,
+                TimeUnit.MILLISECONDS
+            )
+            pose.toHandPose()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun Pose.toHandPose(): HandPose {
+        return HandPose(
+            leftArm = ArmPose(
+                shoulder = point(PoseLandmark.LEFT_SHOULDER),
+                elbow = point(PoseLandmark.LEFT_ELBOW),
+                wrist = point(PoseLandmark.LEFT_WRIST)
+            ),
+            rightArm = ArmPose(
+                shoulder = point(PoseLandmark.RIGHT_SHOULDER),
+                elbow = point(PoseLandmark.RIGHT_ELBOW),
+                wrist = point(PoseLandmark.RIGHT_WRIST)
+            )
+        )
+    }
+
+    private fun Pose.point(type: Int): PosePoint? {
+        val landmark = getPoseLandmark(type) ?: return null
+        return PosePoint(
+            x = landmark.position.x,
+            y = landmark.position.y,
+            confidence = landmark.inFrameLikelihood
+        )
     }
 
     private fun List<Detection>.toDetectionBoxes(): List<DetectionBox> {
@@ -230,9 +285,9 @@ class MainActivity : ComponentActivity() {
 
     private fun renderStatus(analysis: PhoneAnalysis) {
         val status = when (analysis.state) {
-            PhoneState.NO_PHONE -> "Телефон не обнаружен"
-            PhoneState.PHONE_VISIBLE -> "Телефон найден"
-            PhoneState.PHONE_IN_HAND -> "Телефон в руке"
+            PhoneState.NO_PHONE -> "No phone"
+            PhoneState.PHONE_VISIBLE -> "Phone visible"
+            PhoneState.PHONE_IN_HAND -> "Phone in hand"
         }
         val color = when (analysis.state) {
             PhoneState.NO_PHONE -> Color.rgb(0, 184, 148)
@@ -245,11 +300,20 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showPermissionError() {
-        statusText.text = "Для работы нужен доступ к камере"
+        statusText.text = "Camera permission is required"
         statusText.setTextColor(Color.rgb(255, 82, 82))
+    }
+
+    private fun Bitmap.rotate(rotationDegrees: Int): Bitmap {
+        if (rotationDegrees == 0) return this
+        val matrix = Matrix().apply {
+            postRotate(rotationDegrees.toFloat())
+        }
+        return Bitmap.createBitmap(this, 0, 0, width, height, matrix, true)
     }
 
     companion object {
         private const val MODEL_NAME = "efficientdet-lite0.tflite"
+        private const val POSE_TIMEOUT_MS = 450L
     }
 }
