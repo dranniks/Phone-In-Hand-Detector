@@ -137,8 +137,8 @@ class MainActivity : ComponentActivity() {
         try {
             val objectOptions = ObjectDetector.ObjectDetectorOptions.builder()
                 .setBaseOptions(BaseOptions.builder().setNumThreads(4).build())
-                .setScoreThreshold(0.35f)
-                .setMaxResults(8)
+                .setScoreThreshold(0.22f)
+                .setMaxResults(20)
                 .build()
 
             objectDetector = ObjectDetector.createFromFileAndOptions(

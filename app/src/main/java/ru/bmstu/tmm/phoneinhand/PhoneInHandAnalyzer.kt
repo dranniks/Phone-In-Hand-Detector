@@ -10,6 +10,8 @@ class PhoneInHandAnalyzer {
     private var positiveStreak = 0
     private var negativeStreak = 0
     private var lastState = PhoneState.NO_PHONE
+    private var phoneMissStreak = 0
+    private var lastPhone: DetectionBox? = null
 
     fun analyze(
         detections: List<DetectionBox>,
@@ -25,10 +27,12 @@ class PhoneInHandAnalyzer {
             .filter { it.label.equals("person", ignoreCase = true) }
             .sortedByDescending { it.score }
 
-        val phone = phones.firstOrNull()
+        val detectedPhone = phones.firstOrNull()
+        val phone = detectedPhone ?: lastPhone?.takeIf { phoneMissStreak < MAX_PHONE_MEMORY_FRAMES }
         if (phone == null) {
             negativeStreak++
             positiveStreak = 0
+            phoneMissStreak++
             val state = if (negativeStreak >= 2) PhoneState.NO_PHONE else lastState
             lastState = state
             return PhoneAnalysis(
@@ -45,10 +49,18 @@ class PhoneInHandAnalyzer {
             )
         }
 
+        if (detectedPhone != null) {
+            phoneMissStreak = 0
+            lastPhone = detectedPhone
+        } else {
+            phoneMissStreak++
+        }
+
         val linkedPerson = people.maxByOrNull { personAssociationScore(phone.rect, it.rect) }
-        val poseContact = handPose?.let { isPhoneNearPoseHands(phone.rect, it, linkedPerson) } ?: false
+        val reliablePose = handPose?.hasReliableArm() == true
+        val poseContact = handPose?.takeIf { reliablePose }?.let { isPhoneNearPoseHands(phone.rect, it, linkedPerson) } ?: false
         val fallbackContact = linkedPerson != null && isPhoneInHandZone(phone.rect, linkedPerson.rect)
-        val rawInHand = poseContact || (handPose == null && fallbackContact)
+        val rawInHand = poseContact || (!reliablePose && fallbackContact)
 
         if (rawInHand) {
             positiveStreak++
@@ -73,6 +85,8 @@ class PhoneInHandAnalyzer {
             }
             PhoneState.PHONE_VISIBLE -> if (handPose == null) {
                 "Phone found, pose landmarks are not visible"
+            } else if (!reliablePose) {
+                "Phone found, full arm landmarks are not reliable"
             } else {
                 "Phone found, but it is not close to hands"
             }
@@ -119,24 +133,38 @@ class PhoneInHandAnalyzer {
     }
 
     private fun isPhoneNearPoseHands(phone: RectF, handPose: HandPose, person: DetectionBox?): Boolean {
+        val reliableArms = listOf(handPose.leftArm, handPose.rightArm)
+            .filter { it.isReliableArm() }
+        if (reliableArms.isEmpty()) return false
+
         val phoneSize = max(phone.width(), phone.height()).coerceAtLeast(1f)
         val personWidth = person?.rect?.width()?.coerceAtLeast(1f) ?: phoneSize * 4f
         val wristThreshold = max(phoneSize * 1.35f, personWidth * 0.10f).coerceAtLeast(34f)
         val segmentThreshold = max(phoneSize * 1.15f, personWidth * 0.085f).coerceAtLeast(30f)
         val expandedPhone = expanded(phone, 0.65f)
 
-        val wristContact = handPose.wristPoints.any { wrist ->
+        val wristContact = reliableArms.mapNotNull { it.wrist }.any { wrist ->
             wrist.confidence >= MIN_LANDMARK_CONFIDENCE &&
                 (expandedPhone.contains(wrist.x, wrist.y) || distanceToRect(wrist, phone) <= wristThreshold)
         }
         if (wristContact) return true
 
         val phoneCenter = PosePoint(phone.centerX(), phone.centerY(), 1f)
-        return handPose.armSegments.any { (a, b) ->
-            a.confidence >= MIN_LANDMARK_CONFIDENCE &&
-                b.confidence >= MIN_LANDMARK_CONFIDENCE &&
-                distancePointToSegment(phoneCenter, a, b) <= segmentThreshold
+        return reliableArms.any { arm ->
+            val elbow = arm.elbow ?: return@any false
+            val wrist = arm.wrist ?: return@any false
+            distancePointToSegment(phoneCenter, elbow, wrist) <= segmentThreshold
         }
+    }
+
+    private fun HandPose.hasReliableArm(): Boolean {
+        return leftArm.isReliableArm() || rightArm.isReliableArm()
+    }
+
+    private fun ArmPose.isReliableArm(): Boolean {
+        return (shoulder?.confidence ?: 0f) >= MIN_LANDMARK_CONFIDENCE &&
+            (elbow?.confidence ?: 0f) >= MIN_LANDMARK_CONFIDENCE &&
+            (wrist?.confidence ?: 0f) >= MIN_LANDMARK_CONFIDENCE
     }
 
     private fun personAssociationScore(phone: RectF, person: RectF): Float {
@@ -193,5 +221,6 @@ class PhoneInHandAnalyzer {
 
     companion object {
         private const val MIN_LANDMARK_CONFIDENCE = 0.35f
+        private const val MAX_PHONE_MEMORY_FRAMES = 5
     }
 }

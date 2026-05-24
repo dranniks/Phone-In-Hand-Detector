@@ -30,9 +30,7 @@ data class HandPose(
     val armSegments: List<Pair<PosePoint, PosePoint>>
         get() = listOfNotNull(
             leftArm.elbow?.let { elbow -> leftArm.wrist?.let { wrist -> elbow to wrist } },
-            rightArm.elbow?.let { elbow -> rightArm.wrist?.let { wrist -> elbow to wrist } },
-            leftArm.shoulder?.let { shoulder -> leftArm.elbow?.let { elbow -> shoulder to elbow } },
-            rightArm.shoulder?.let { shoulder -> rightArm.elbow?.let { elbow -> shoulder to elbow } }
+            rightArm.elbow?.let { elbow -> rightArm.wrist?.let { wrist -> elbow to wrist } }
         )
 }
 
