@@ -313,7 +313,7 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
-        private const val MODEL_NAME = "efficientdet-lite0.tflite"
+        private const val MODEL_NAME = "efficientdet-lite2.tflite"
         private const val POSE_TIMEOUT_MS = 450L
     }
 }
