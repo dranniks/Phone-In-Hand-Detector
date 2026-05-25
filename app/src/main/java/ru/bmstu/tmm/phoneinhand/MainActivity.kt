@@ -27,10 +27,6 @@ import com.google.mlkit.vision.pose.PoseDetection
 import com.google.mlkit.vision.pose.PoseDetector
 import com.google.mlkit.vision.pose.PoseLandmark
 import com.google.mlkit.vision.pose.defaults.PoseDetectorOptions
-import org.tensorflow.lite.support.image.TensorImage
-import org.tensorflow.lite.task.core.BaseOptions
-import org.tensorflow.lite.task.vision.detector.Detection
-import org.tensorflow.lite.task.vision.detector.ObjectDetector
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -42,7 +38,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var metricsText: TextView
     private lateinit var cameraExecutor: ExecutorService
 
-    private var objectDetector: ObjectDetector? = null
+    private var objectDetector: YoloOnnxDetector? = null
     private var poseDetector: PoseDetector? = null
     private var bitmapBuffer: Bitmap? = null
     private val analyzer = PhoneInHandAnalyzer()
@@ -135,17 +131,7 @@ class MainActivity : ComponentActivity() {
 
     private fun setupModels() {
         try {
-            val objectOptions = ObjectDetector.ObjectDetectorOptions.builder()
-                .setBaseOptions(BaseOptions.builder().setNumThreads(4).build())
-                .setScoreThreshold(0.22f)
-                .setMaxResults(20)
-                .build()
-
-            objectDetector = ObjectDetector.createFromFileAndOptions(
-                this,
-                MODEL_NAME,
-                objectOptions
-            )
+            objectDetector = YoloOnnxDetector(this)
 
             val poseOptions = PoseDetectorOptions.Builder()
                 .setDetectorMode(PoseDetectorOptions.STREAM_MODE)
@@ -204,19 +190,18 @@ class MainActivity : ComponentActivity() {
 
         try {
             val orientedBitmap = bitmap.rotate(rotation)
-            val tensorImage = TensorImage.fromBitmap(orientedBitmap)
 
             val started = System.currentTimeMillis()
-            val objectResults = detector.detect(tensorImage)
+            val objectResults = detector.detect(orientedBitmap)
             val handPose = detectPose(orientedBitmap)
             val inferenceTime = System.currentTimeMillis() - started
 
             val analysis = analyzer.analyze(
-                detections = objectResults.toDetectionBoxes(),
+                detections = objectResults,
                 handPose = handPose,
                 inferenceTimeMs = inferenceTime,
-                imageWidth = tensorImage.width,
-                imageHeight = tensorImage.height
+                imageWidth = orientedBitmap.width,
+                imageHeight = orientedBitmap.height
             )
 
             if (orientedBitmap !== bitmap) {
@@ -272,17 +257,6 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    private fun List<Detection>.toDetectionBoxes(): List<DetectionBox> {
-        return mapNotNull { detection ->
-            val category = detection.categories.maxByOrNull { it.score } ?: return@mapNotNull null
-            DetectionBox(
-                label = category.label,
-                score = category.score,
-                rect = detection.boundingBox
-            )
-        }
-    }
-
     private fun renderStatus(analysis: PhoneAnalysis) {
         val status = when (analysis.state) {
             PhoneState.NO_PHONE -> "No phone"
@@ -313,7 +287,6 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
-        private const val MODEL_NAME = "efficientdet-lite2.tflite"
         private const val POSE_TIMEOUT_MS = 450L
     }
 }

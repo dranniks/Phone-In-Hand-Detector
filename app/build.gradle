@@ -33,6 +33,7 @@ android {
 
     aaptOptions {
         noCompress "tflite"
+        noCompress "onnx"
     }
 }
 
@@ -44,5 +45,5 @@ dependencies {
     implementation "androidx.camera:camera-lifecycle:1.4.1"
     implementation "androidx.camera:camera-view:1.4.1"
     implementation "com.google.mlkit:pose-detection:18.0.0-beta5"
-    implementation "org.tensorflow:tensorflow-lite-task-vision:0.4.4"
+    implementation "com.microsoft.onnxruntime:onnxruntime-android:1.25.1"
 }

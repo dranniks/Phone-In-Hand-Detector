@@ -5,3 +5,6 @@ local.properties
 tmp/
 *.iml
 .idea/
+/yolo11n.pt
+/yolo11n.onnx
+Ultralytics/
