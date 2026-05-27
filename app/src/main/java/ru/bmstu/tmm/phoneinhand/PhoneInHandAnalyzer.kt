@@ -40,7 +40,7 @@ class PhoneInHandAnalyzer {
                 phone = null,
                 person = null,
                 confidence = 0f,
-                reason = "No phone detected",
+                reason = "Телефон не обнаружен",
                 inferenceTimeMs = inferenceTimeMs,
                 imageWidth = imageWidth,
                 imageHeight = imageHeight,
@@ -79,18 +79,18 @@ class PhoneInHandAnalyzer {
 
         val reason = when (smoothedState) {
             PhoneState.PHONE_IN_HAND -> if (poseContact) {
-                "Phone is close to wrist or forearm landmarks"
+                "Телефон рядом с кистью или предплечьем"
             } else {
-                "Phone is in a plausible hand zone"
+                "Телефон находится в зоне рук"
             }
             PhoneState.PHONE_VISIBLE -> if (handPose == null) {
-                "Phone found, pose landmarks are not visible"
+                "Телефон найден, положение рук не видно"
             } else if (!reliablePose) {
-                "Phone found, full arm landmarks are not reliable"
+                "Телефон найден, положение рук определено неуверенно"
             } else {
-                "Phone found, but it is not close to hands"
+                "Телефон найден, но он не рядом с кистью"
             }
-            PhoneState.NO_PHONE -> "No phone detected"
+            PhoneState.NO_PHONE -> "Телефон не обнаружен"
         }
 
         return PhoneAnalysis(

@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -35,12 +36,18 @@ class MainActivity : ComponentActivity() {
     private lateinit var previewView: PreviewView
     private lateinit var overlayView: OverlayView
     private lateinit var statusText: TextView
+    private lateinit var hintText: TextView
     private lateinit var metricsText: TextView
+    private lateinit var phoneText: TextView
+    private lateinit var confidenceText: TextView
+    private lateinit var contactText: TextView
     private lateinit var cameraExecutor: ExecutorService
 
     private var objectDetector: YoloOnnxDetector? = null
     private var poseDetector: PoseDetector? = null
     private var bitmapBuffer: Bitmap? = null
+    private var lastUiFrameTimeMs = 0L
+    private var smoothFps = 0f
     private val analyzer = PhoneInHandAnalyzer()
 
     private val requestPermission = registerForActivityResult(
@@ -94,37 +101,80 @@ class MainActivity : ComponentActivity() {
             )
         )
 
-        statusText = TextView(this).apply {
-            text = "Starting camera"
-            setTextColor(Color.WHITE)
-            textSize = 18f
-            gravity = Gravity.CENTER
+        val statusPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
             setBackgroundResource(R.drawable.status_panel)
+            setPadding(dp(14), dp(10), dp(14), dp(10))
         }
+        statusText = TextView(this).apply {
+            text = "Запуск камеры"
+            setTextColor(Color.WHITE)
+            textSize = 22f
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+        }
+        hintText = TextView(this).apply {
+            text = "Наведите камеру на человека и телефон"
+            setTextColor(Color.rgb(226, 232, 240))
+            textSize = 14f
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+        }
+        statusPanel.addView(statusText, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
+        statusPanel.addView(hintText, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            topMargin = dp(5)
+        })
         val statusParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.WRAP_CONTENT,
             Gravity.TOP
         ).apply {
-            setMargins(24, 42, 24, 0)
+            setMargins(dp(16), dp(34), dp(16), 0)
         }
-        root.addView(statusText, statusParams)
+        root.addView(statusPanel, statusParams)
 
-        metricsText = TextView(this).apply {
-            text = "Inference: -- | confidence: --"
-            setTextColor(Color.WHITE)
-            textSize = 14f
+        val metricsPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setBackgroundResource(R.drawable.status_panel)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
         }
+        val metricsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        metricsText = metricView("Кадр/с", "--")
+        phoneText = metricView("Телефоны", "--")
+        confidenceText = metricView("Уверенность", "--")
+        contactText = metricView("Рука", "--")
+        listOf(metricsText, phoneText, confidenceText, contactText).forEachIndexed { index, view ->
+            metricsRow.addView(view, LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            ).apply {
+                if (index > 0) leftMargin = dp(8)
+            })
+        }
+        metricsPanel.addView(metricsRow, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
         val metricsParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.WRAP_CONTENT,
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            Gravity.BOTTOM
         ).apply {
-            setMargins(24, 0, 24, 42)
+            setMargins(dp(16), 0, dp(16), dp(34))
         }
-        root.addView(metricsText, metricsParams)
+        root.addView(metricsPanel, metricsParams)
 
         return root
     }
@@ -138,7 +188,8 @@ class MainActivity : ComponentActivity() {
                 .build()
             poseDetector = PoseDetection.getClient(poseOptions)
         } catch (error: Exception) {
-            statusText.text = "Model error: ${error.message}"
+            statusText.text = "Ошибка запуска"
+            hintText.text = "Не удалось подготовить распознавание"
         }
     }
 
@@ -214,7 +265,8 @@ class MainActivity : ComponentActivity() {
             }
         } catch (error: Exception) {
             runOnUiThread {
-                statusText.text = "Analysis error: ${error.message}"
+                statusText.text = "Ошибка анализа"
+                hintText.text = "Попробуйте перезапустить приложение"
             }
         }
     }
@@ -259,23 +311,71 @@ class MainActivity : ComponentActivity() {
 
     private fun renderStatus(analysis: PhoneAnalysis) {
         val status = when (analysis.state) {
-            PhoneState.NO_PHONE -> "No phone"
-            PhoneState.PHONE_VISIBLE -> "Phone visible"
-            PhoneState.PHONE_IN_HAND -> "Phone in hand"
+            PhoneState.NO_PHONE -> "Телефон не найден"
+            PhoneState.PHONE_VISIBLE -> "Телефон в кадре"
+            PhoneState.PHONE_IN_HAND -> "Телефон в руке"
         }
         val color = when (analysis.state) {
             PhoneState.NO_PHONE -> Color.rgb(0, 184, 148)
             PhoneState.PHONE_VISIBLE -> Color.rgb(253, 203, 110)
             PhoneState.PHONE_IN_HAND -> Color.rgb(255, 82, 82)
         }
-        statusText.text = "$status\n${analysis.reason}"
+        val hint = when (analysis.state) {
+            PhoneState.NO_PHONE -> "Покажите телефон ближе к камере"
+            PhoneState.PHONE_VISIBLE -> "Телефон виден, контакта с рукой нет"
+            PhoneState.PHONE_IN_HAND -> "Обнаружен телефон рядом с кистью"
+        }
+        val phoneCount = analysis.allDetections.count { it.label.isPhoneLabel() }
+        val fps = updateFps()
+
+        statusText.text = status
         statusText.setTextColor(color)
-        metricsText.text = "Inference: ${analysis.inferenceTimeMs} ms | confidence: ${"%.2f".format(analysis.confidence)}"
+        hintText.text = hint
+        metricsText.text = "Кадр/с\n${if (fps > 0f) "%.1f".format(fps) else "--"}"
+        phoneText.text = "Телефоны\n$phoneCount"
+        confidenceText.text = "Уверенность\n${if (analysis.confidence > 0f) "${(analysis.confidence * 100).toInt()}%" else "--"}"
+        contactText.text = "Рука\n${if (analysis.state == PhoneState.PHONE_IN_HAND) "да" else "нет"}"
     }
 
     private fun showPermissionError() {
-        statusText.text = "Camera permission is required"
+        statusText.text = "Нет доступа к камере"
+        hintText.text = "Разрешите доступ в настройках приложения"
         statusText.setTextColor(Color.rgb(255, 82, 82))
+    }
+
+    private fun updateFps(): Float {
+        val now = System.currentTimeMillis()
+        if (lastUiFrameTimeMs == 0L) {
+            lastUiFrameTimeMs = now
+            return 0f
+        }
+        val delta = (now - lastUiFrameTimeMs).coerceAtLeast(1L)
+        lastUiFrameTimeMs = now
+        val currentFps = 1000f / delta.toFloat()
+        smoothFps = if (smoothFps == 0f) currentFps else smoothFps * 0.85f + currentFps * 0.15f
+        return smoothFps
+    }
+
+    private fun metricView(title: String, value: String): TextView {
+        return TextView(this).apply {
+            text = "$title\n$value"
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+        }
+    }
+
+    private fun String.isPhoneLabel(): Boolean {
+        val normalized = lowercase()
+        return normalized == "cell phone" ||
+            normalized == "mobile phone" ||
+            normalized == "phone" ||
+            normalized.contains("cellphone")
+    }
+
+    private fun dp(value: Int): Int {
+        return (value * resources.displayMetrics.density).toInt()
     }
 
     private fun Bitmap.rotate(rotationDegrees: Int): Bitmap {

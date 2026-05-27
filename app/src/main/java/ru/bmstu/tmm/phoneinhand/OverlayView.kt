@@ -58,10 +58,10 @@ class OverlayView @JvmOverloads constructor(
         val scaleY = height.toFloat() / value.imageHeight.toFloat()
 
         value.person?.let {
-            drawBox(canvas, it, scaleX, scaleY, personPaint, "person ${(it.score * 100).toInt()}%")
+            drawBox(canvas, it, scaleX, scaleY, personPaint, "человек")
         }
         value.phone?.let {
-            drawBox(canvas, it, scaleX, scaleY, phonePaint, "phone ${(it.score * 100).toInt()}%")
+            drawBox(canvas, it, scaleX, scaleY, phonePaint, "телефон ${(it.score * 100).toInt()}%")
         }
         value.handPose?.let {
             drawArm(canvas, it.leftArm, scaleX, scaleY)
