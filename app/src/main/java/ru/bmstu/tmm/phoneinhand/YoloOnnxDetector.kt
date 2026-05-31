@@ -20,7 +20,11 @@ class YoloOnnxDetector(context: Context) : AutoCloseable {
 
     init {
         val modelBytes = context.assets.open(MODEL_NAME).use { it.readBytes() }
-        session = environment.createSession(modelBytes, OrtSession.SessionOptions())
+        val sessionOptions = OrtSession.SessionOptions().apply {
+            setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+            setIntraOpNumThreads(Runtime.getRuntime().availableProcessors().coerceAtMost(4))
+        }
+        session = environment.createSession(modelBytes, sessionOptions)
     }
 
     fun detect(bitmap: Bitmap): List<DetectionBox> {
@@ -103,10 +107,10 @@ class YoloOnnxDetector(context: Context) : AutoCloseable {
     )
 
     companion object {
-        private const val MODEL_NAME = "yolo11m.onnx"
+        private const val MODEL_NAME = "yolo11s_512.onnx"
         private const val INPUT_NAME = "images"
-        private const val INPUT_SIZE = 640
-        private const val SCORE_THRESHOLD = 0.18f
+        private const val INPUT_SIZE = 512
+        private const val SCORE_THRESHOLD = 0.16f
         private const val MIN_BOX_SIZE = 8f
 
         private val COCO_LABELS = listOf(

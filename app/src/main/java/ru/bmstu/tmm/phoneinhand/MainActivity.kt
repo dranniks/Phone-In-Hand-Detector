@@ -41,6 +41,9 @@ class MainActivity : ComponentActivity() {
     private var bitmapBuffer: Bitmap? = null
     private var lastUiFrameTimeMs = 0L
     private var smoothFps = 0f
+    private var frameIndex = 0
+    private var cachedHandPose: HandPose? = null
+    private var cachedHandAge = MAX_HAND_CACHE_FRAMES + 1
     private val analyzer = PhoneInHandAnalyzer()
 
     private val requestPermission = registerForActivityResult(
@@ -233,7 +236,7 @@ class MainActivity : ComponentActivity() {
 
             val started = System.currentTimeMillis()
             val objectResults = detector.detect(orientedBitmap)
-            val handPose = detectHands(orientedBitmap)
+            val handPose = detectHandsIfNeeded(orientedBitmap, objectResults)
             val inferenceTime = System.currentTimeMillis() - started
 
             val analysis = analyzer.analyze(
@@ -260,12 +263,27 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun detectHands(bitmap: Bitmap): HandPose? {
-        return try {
-            handDetector?.detect(bitmap, SystemClock.uptimeMillis())
-        } catch (_: Exception) {
-            null
+    private fun detectHandsIfNeeded(bitmap: Bitmap, detections: List<DetectionBox>): HandPose? {
+        frameIndex++
+        val phoneVisible = detections.any { it.label.isPhoneLabel() }
+        val shouldRefresh = phoneVisible && (
+            cachedHandPose == null ||
+                cachedHandAge >= MAX_HAND_CACHE_FRAMES ||
+                frameIndex % HAND_DETECTION_INTERVAL == 0
+            )
+
+        if (shouldRefresh) {
+            cachedHandPose = try {
+                handDetector?.detect(bitmap, SystemClock.uptimeMillis())
+            } catch (_: Exception) {
+                null
+            }
+            cachedHandAge = 0
+        } else {
+            cachedHandAge++
         }
+
+        return cachedHandPose?.takeIf { cachedHandAge <= MAX_HAND_CACHE_FRAMES }
     }
 
     private fun renderStatus(analysis: PhoneAnalysis) {
@@ -344,5 +362,8 @@ class MainActivity : ComponentActivity() {
         }
         return Bitmap.createBitmap(this, 0, 0, width, height, matrix, true)
     }
-
+    companion object {
+        private const val HAND_DETECTION_INTERVAL = 3
+        private const val MAX_HAND_CACHE_FRAMES = 8
+    }
 }
