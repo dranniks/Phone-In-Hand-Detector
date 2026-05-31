@@ -46,11 +46,16 @@ class YoloOnnxDetector(context: Context) : AutoCloseable {
     private fun FloatArray.toDetection(letterbox: LetterboxFrame, imageWidth: Int, imageHeight: Int): DetectionBox? {
         if (size < 6) return null
         val score = this[4]
-        if (score < SCORE_THRESHOLD) return null
-
         val classId = this[5].roundToInt()
         val label = COCO_LABELS.getOrNull(classId) ?: return null
-        if (label != "person" && label != "cell phone") return null
+        val normalizedLabel = when {
+            label == "cell phone" -> label
+            label == "person" -> label
+            label in PHONE_LIKE_LABELS && score >= PHONE_LIKE_SCORE_THRESHOLD -> PHONE_LIKE_LABEL
+            else -> return null
+        }
+        val requiredScore = if (normalizedLabel == PHONE_LIKE_LABEL) PHONE_LIKE_SCORE_THRESHOLD else SCORE_THRESHOLD
+        if (score < requiredScore) return null
 
         val left = ((this[0] - letterbox.padX) / letterbox.scale).coerceIn(0f, imageWidth.toFloat())
         val top = ((this[1] - letterbox.padY) / letterbox.scale).coerceIn(0f, imageHeight.toFloat())
@@ -59,7 +64,7 @@ class YoloOnnxDetector(context: Context) : AutoCloseable {
         if (right - left < MIN_BOX_SIZE || bottom - top < MIN_BOX_SIZE) return null
 
         return DetectionBox(
-            label = label,
+            label = normalizedLabel,
             score = score,
             rect = RectF(left, top, right, bottom)
         )
@@ -111,7 +116,10 @@ class YoloOnnxDetector(context: Context) : AutoCloseable {
         private const val INPUT_NAME = "images"
         private const val INPUT_SIZE = 512
         private const val SCORE_THRESHOLD = 0.16f
+        private const val PHONE_LIKE_SCORE_THRESHOLD = 0.20f
         private const val MIN_BOX_SIZE = 8f
+        private const val PHONE_LIKE_LABEL = "phone-like"
+        private val PHONE_LIKE_LABELS = setOf("remote", "mouse", "book")
 
         private val COCO_LABELS = listOf(
             "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",

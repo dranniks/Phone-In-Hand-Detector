@@ -101,8 +101,18 @@ class PhoneInHandAnalyzer {
     private fun choosePhone(phones: List<DetectionBox>): DetectionBox? {
         if (phones.isEmpty()) return null
         val previous = trackedPhone ?: return phones.first()
-        return phones.maxByOrNull { phoneTrackingScore(previous.rect, it.rect, it.score) }
-            ?.takeIf { phoneTrackingScore(previous.rect, it.rect, it.score) > TRACK_MATCH_THRESHOLD }
+        val best = phones.maxByOrNull { phoneTrackingScore(previous.rect, it.rect, it.score) }
+        if (best != null && phoneTrackingScore(previous.rect, best.rect, best.score) > TRACK_MATCH_THRESHOLD) {
+            return best
+        }
+        val phoneLikeTrack = phones
+            .filter { it.label == PHONE_LIKE_LABEL }
+            .maxByOrNull { phoneLikeTrackingScore(previous.rect, it.rect, it.score) }
+            ?.takeIf { phoneLikeTrackingScore(previous.rect, it.rect, it.score) > PHONE_LIKE_TRACK_THRESHOLD }
+        if (phoneLikeTrack != null) {
+            return phoneLikeTrack.copy(label = "cell phone", score = min(phoneLikeTrack.score, previous.score * 0.88f))
+        }
+        return phones.firstOrNull { it.score >= STRONG_PHONE_SCORE && it.label.isPhoneLabel() }
             ?: phones.firstOrNull { it.score >= STRONG_PHONE_SCORE }
     }
 
@@ -135,7 +145,8 @@ class PhoneInHandAnalyzer {
         return normalized == "cell phone" ||
             normalized == "mobile phone" ||
             normalized == "phone" ||
-            normalized.contains("cellphone")
+            normalized.contains("cellphone") ||
+            normalized == PHONE_LIKE_LABEL
     }
 
     private fun isPhoneInHandZone(phone: RectF, person: RectF): Boolean {
@@ -183,6 +194,12 @@ class PhoneInHandAnalyzer {
         val diagonal = sqrt(previous.width() * previous.width() + previous.height() * previous.height()).coerceAtLeast(1f)
         val centerDistance = distance(previous.centerX(), previous.centerY(), current.centerX(), current.centerY()) / diagonal
         return iouScore * 2.2f + score - centerDistance * 0.75f
+    }
+
+    private fun phoneLikeTrackingScore(previous: RectF, current: RectF, score: Float): Float {
+        val sizeRatio = min(previous.area(), current.area()) / max(previous.area(), current.area()).coerceAtLeast(1f)
+        val aspectRatio = min(previous.aspectRatio(), current.aspectRatio()) / max(previous.aspectRatio(), current.aspectRatio()).coerceAtLeast(0.1f)
+        return phoneTrackingScore(previous, current, score) + sizeRatio * 0.45f + aspectRatio * 0.35f
     }
 
     private fun smoothRect(previous: RectF, current: RectF, alpha: Float): RectF {
@@ -241,13 +258,23 @@ class PhoneInHandAnalyzer {
         return sqrt(dx * dx + dy * dy)
     }
 
+    private fun RectF.area(): Float = width() * height()
+
+    private fun RectF.aspectRatio(): Float {
+        val shortSide = min(width(), height()).coerceAtLeast(1f)
+        val longSide = max(width(), height()).coerceAtLeast(1f)
+        return longSide / shortSide
+    }
+
     companion object {
         private const val IN_HAND_CONFIRM_FRAMES = 2
         private const val VISIBLE_CONFIRM_FRAMES = 3
         private const val NO_PHONE_CONFIRM_FRAMES = 3
-        private const val MAX_PHONE_MEMORY_FRAMES = 2
+        private const val MAX_PHONE_MEMORY_FRAMES = 5
         private const val PHONE_SMOOTHING = 0.55f
         private const val STRONG_PHONE_SCORE = 0.30f
         private const val TRACK_MATCH_THRESHOLD = 0.10f
+        private const val PHONE_LIKE_TRACK_THRESHOLD = 0.18f
+        private const val PHONE_LIKE_LABEL = "phone-like"
     }
 }
