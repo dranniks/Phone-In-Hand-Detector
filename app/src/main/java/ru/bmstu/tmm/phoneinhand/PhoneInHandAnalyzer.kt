@@ -30,7 +30,8 @@ class PhoneInHandAnalyzer {
             .filter { it.label.equals("person", ignoreCase = true) }
             .sortedByDescending { it.score }
 
-        val detectedPhone = choosePhone(phoneDetections, phoneLikeDetections)
+        val reliableHands = handPose?.takeIf { it.hasReliableHand() }
+        val detectedPhone = choosePhone(phoneDetections, phoneLikeDetections, reliableHands)
         val phone = updateTrackedPhone(detectedPhone)
         if (phone == null) {
             noPhoneStreak++
@@ -53,7 +54,6 @@ class PhoneInHandAnalyzer {
         }
 
         val linkedPerson = people.maxByOrNull { personAssociationScore(phone.rect, it.rect) }
-        val reliableHands = handPose?.takeIf { it.hasReliableHand() }
         val handContact = reliableHands?.let { isPhoneNearHandLandmarks(phone.rect, it, linkedPerson) } ?: false
         val fallbackContact = reliableHands == null && linkedPerson != null && isPhoneInHandZone(phone.rect, linkedPerson.rect)
         val rawInHand = handContact || fallbackContact
@@ -101,8 +101,19 @@ class PhoneInHandAnalyzer {
         )
     }
 
-    private fun choosePhone(phones: List<DetectionBox>, phoneLikes: List<DetectionBox>): DetectionBox? {
+    private fun choosePhone(
+        phones: List<DetectionBox>,
+        phoneLikes: List<DetectionBox>,
+        handPose: HandPose?
+    ): DetectionBox? {
         val previous = trackedPhone ?: return phones.firstOrNull()
+            ?: phoneLikes.firstOrNull { candidate ->
+                handPose != null &&
+                    candidate.score >= INITIAL_PHONE_LIKE_SCORE &&
+                    isPhoneNearHandLandmarks(candidate.rect, handPose, null)
+            }?.let { candidate ->
+                candidate.copy(label = "cell phone", score = candidate.score.coerceAtMost(PHONE_LIKE_AS_PHONE_SCORE))
+            }
         val best = phones.maxByOrNull { phoneTrackingScore(previous.rect, it.rect, it.score) }
         if (best != null && phoneTrackingScore(previous.rect, best.rect, best.score) > TRACK_MATCH_THRESHOLD) {
             return best
@@ -282,6 +293,8 @@ class PhoneInHandAnalyzer {
         private const val STRONG_PHONE_SCORE = 0.30f
         private const val TRACK_MATCH_THRESHOLD = 0.10f
         private const val PHONE_LIKE_TRACK_THRESHOLD = 1.15f
+        private const val INITIAL_PHONE_LIKE_SCORE = 0.38f
+        private const val PHONE_LIKE_AS_PHONE_SCORE = 0.42f
         private const val PHONE_LIKE_LABEL = "phone-like"
     }
 }
