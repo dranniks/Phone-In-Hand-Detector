@@ -20,14 +20,17 @@ class PhoneInHandAnalyzer {
         imageWidth: Int,
         imageHeight: Int
     ): PhoneAnalysis {
-        val phones = detections
+        val phoneDetections = detections
             .filter { it.label.isPhoneLabel() }
+            .sortedByDescending { it.score }
+        val phoneLikeDetections = detections
+            .filter { it.label == PHONE_LIKE_LABEL }
             .sortedByDescending { it.score }
         val people = detections
             .filter { it.label.equals("person", ignoreCase = true) }
             .sortedByDescending { it.score }
 
-        val detectedPhone = choosePhone(phones)
+        val detectedPhone = choosePhone(phoneDetections, phoneLikeDetections)
         val phone = updateTrackedPhone(detectedPhone)
         if (phone == null) {
             noPhoneStreak++
@@ -98,22 +101,23 @@ class PhoneInHandAnalyzer {
         )
     }
 
-    private fun choosePhone(phones: List<DetectionBox>): DetectionBox? {
-        if (phones.isEmpty()) return null
+    private fun choosePhone(phones: List<DetectionBox>, phoneLikes: List<DetectionBox>): DetectionBox? {
         val previous = trackedPhone ?: return phones.first()
         val best = phones.maxByOrNull { phoneTrackingScore(previous.rect, it.rect, it.score) }
         if (best != null && phoneTrackingScore(previous.rect, best.rect, best.score) > TRACK_MATCH_THRESHOLD) {
             return best
         }
-        val phoneLikeTrack = phones
-            .filter { it.label == PHONE_LIKE_LABEL }
+        if (phones.isNotEmpty()) {
+            return phones.firstOrNull { it.score >= STRONG_PHONE_SCORE }
+        }
+
+        val phoneLikeTrack = phoneLikes
             .maxByOrNull { phoneLikeTrackingScore(previous.rect, it.rect, it.score) }
             ?.takeIf { phoneLikeTrackingScore(previous.rect, it.rect, it.score) > PHONE_LIKE_TRACK_THRESHOLD }
         if (phoneLikeTrack != null) {
             return phoneLikeTrack.copy(label = "cell phone", score = min(phoneLikeTrack.score, previous.score * 0.88f))
         }
-        return phones.firstOrNull { it.score >= STRONG_PHONE_SCORE && it.label.isPhoneLabel() }
-            ?: phones.firstOrNull { it.score >= STRONG_PHONE_SCORE }
+        return null
     }
 
     private fun updateTrackedPhone(detectedPhone: DetectionBox?): DetectionBox? {
@@ -145,8 +149,7 @@ class PhoneInHandAnalyzer {
         return normalized == "cell phone" ||
             normalized == "mobile phone" ||
             normalized == "phone" ||
-            normalized.contains("cellphone") ||
-            normalized == PHONE_LIKE_LABEL
+            normalized.contains("cellphone")
     }
 
     private fun isPhoneInHandZone(phone: RectF, person: RectF): Boolean {
@@ -199,6 +202,10 @@ class PhoneInHandAnalyzer {
     private fun phoneLikeTrackingScore(previous: RectF, current: RectF, score: Float): Float {
         val sizeRatio = min(previous.area(), current.area()) / max(previous.area(), current.area()).coerceAtLeast(1f)
         val aspectRatio = min(previous.aspectRatio(), current.aspectRatio()) / max(previous.aspectRatio(), current.aspectRatio()).coerceAtLeast(0.1f)
+        val centerDistance = distance(previous.centerX(), previous.centerY(), current.centerX(), current.centerY())
+        val maxAllowedShift = max(previous.width(), previous.height()) * 0.55f
+        if (centerDistance > maxAllowedShift) return -1f
+        if (sizeRatio < 0.55f || aspectRatio < 0.70f) return -1f
         return phoneTrackingScore(previous, current, score) + sizeRatio * 0.45f + aspectRatio * 0.35f
     }
 
@@ -274,7 +281,7 @@ class PhoneInHandAnalyzer {
         private const val PHONE_SMOOTHING = 0.55f
         private const val STRONG_PHONE_SCORE = 0.30f
         private const val TRACK_MATCH_THRESHOLD = 0.10f
-        private const val PHONE_LIKE_TRACK_THRESHOLD = 0.18f
+        private const val PHONE_LIKE_TRACK_THRESHOLD = 1.15f
         private const val PHONE_LIKE_LABEL = "phone-like"
     }
 }

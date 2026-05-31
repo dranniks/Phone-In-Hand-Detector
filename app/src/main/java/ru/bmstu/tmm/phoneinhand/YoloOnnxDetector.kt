@@ -116,10 +116,10 @@ class YoloOnnxDetector(context: Context) : AutoCloseable {
         private const val INPUT_NAME = "images"
         private const val INPUT_SIZE = 512
         private const val SCORE_THRESHOLD = 0.16f
-        private const val PHONE_LIKE_SCORE_THRESHOLD = 0.20f
+        private const val PHONE_LIKE_SCORE_THRESHOLD = 0.45f
         private const val MIN_BOX_SIZE = 8f
         private const val PHONE_LIKE_LABEL = "phone-like"
-        private val PHONE_LIKE_LABELS = setOf("remote", "mouse", "book")
+        private val PHONE_LIKE_LABELS = setOf("remote")
 
         private val COCO_LABELS = listOf(
             "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
