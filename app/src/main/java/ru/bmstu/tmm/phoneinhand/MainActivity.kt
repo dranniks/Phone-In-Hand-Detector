@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.graphics.Matrix
 import android.os.Bundle
 import android.os.SystemClock
+import android.util.Size
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -196,7 +197,7 @@ class MainActivity : ComponentActivity() {
                 .also { it.setSurfaceProvider(previewView.surfaceProvider) }
 
             val imageAnalyzer = ImageAnalysis.Builder()
-                .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+                .setTargetResolution(Size(640, 480))
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 .build()
@@ -363,7 +364,7 @@ class MainActivity : ComponentActivity() {
         return Bitmap.createBitmap(this, 0, 0, width, height, matrix, true)
     }
     companion object {
-        private const val HAND_DETECTION_INTERVAL = 3
-        private const val MAX_HAND_CACHE_FRAMES = 8
+        private const val HAND_DETECTION_INTERVAL = 5
+        private const val MAX_HAND_CACHE_FRAMES = 6
     }
 }

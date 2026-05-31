@@ -37,9 +37,9 @@ class PhoneInHandAnalyzer {
             lastState = state
             return PhoneAnalysis(
                 state = state,
-                phone = trackedPhone,
+                phone = null,
                 person = null,
-                confidence = trackedPhone?.score ?: 0f,
+                confidence = 0f,
                 reason = "Телефон не обнаружен",
                 inferenceTimeMs = inferenceTimeMs,
                 imageWidth = imageWidth,
@@ -109,7 +109,11 @@ class PhoneInHandAnalyzer {
     private fun updateTrackedPhone(detectedPhone: DetectionBox?): DetectionBox? {
         if (detectedPhone == null) {
             noPhoneStreak++
-            return trackedPhone?.takeIf { noPhoneStreak <= MAX_PHONE_MEMORY_FRAMES }
+            if (noPhoneStreak > MAX_PHONE_MEMORY_FRAMES) {
+                trackedPhone = null
+                return null
+            }
+            return trackedPhone
         }
 
         noPhoneStreak = 0
@@ -239,10 +243,10 @@ class PhoneInHandAnalyzer {
 
     companion object {
         private const val IN_HAND_CONFIRM_FRAMES = 2
-        private const val VISIBLE_CONFIRM_FRAMES = 6
-        private const val NO_PHONE_CONFIRM_FRAMES = 10
-        private const val MAX_PHONE_MEMORY_FRAMES = 12
-        private const val PHONE_SMOOTHING = 0.42f
+        private const val VISIBLE_CONFIRM_FRAMES = 3
+        private const val NO_PHONE_CONFIRM_FRAMES = 3
+        private const val MAX_PHONE_MEMORY_FRAMES = 2
+        private const val PHONE_SMOOTHING = 0.55f
         private const val STRONG_PHONE_SCORE = 0.30f
         private const val TRACK_MATCH_THRESHOLD = 0.10f
     }

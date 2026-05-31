@@ -107,7 +107,7 @@ class YoloOnnxDetector(context: Context) : AutoCloseable {
     )
 
     companion object {
-        private const val MODEL_NAME = "yolo11s_512.onnx"
+        private const val MODEL_NAME = "yolo11n_512.onnx"
         private const val INPUT_NAME = "images"
         private const val INPUT_SIZE = 512
         private const val SCORE_THRESHOLD = 0.16f
