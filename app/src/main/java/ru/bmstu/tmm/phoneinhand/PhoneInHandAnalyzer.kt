@@ -102,7 +102,7 @@ class PhoneInHandAnalyzer {
     }
 
     private fun choosePhone(phones: List<DetectionBox>, phoneLikes: List<DetectionBox>): DetectionBox? {
-        val previous = trackedPhone ?: return phones.first()
+        val previous = trackedPhone ?: return phones.firstOrNull()
         val best = phones.maxByOrNull { phoneTrackingScore(previous.rect, it.rect, it.score) }
         if (best != null && phoneTrackingScore(previous.rect, best.rect, best.score) > TRACK_MATCH_THRESHOLD) {
             return best
