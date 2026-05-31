@@ -40,7 +40,7 @@ class OverlayView @JvmOverloads constructor(
     }
     private val poseLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 4f
+        strokeWidth = 3f
         color = Color.rgb(255, 235, 59)
     }
 
@@ -63,25 +63,26 @@ class OverlayView @JvmOverloads constructor(
         value.phone?.let {
             drawBox(canvas, it, scaleX, scaleY, phonePaint, "телефон ${(it.score * 100).toInt()}%")
         }
-        value.handPose?.let {
-            drawArm(canvas, it.leftArm, scaleX, scaleY)
-            drawArm(canvas, it.rightArm, scaleX, scaleY)
+        value.handPose?.takeIf { it.hasReliableHand() }?.let {
+            drawHands(canvas, it, scaleX, scaleY)
         }
     }
 
-    private fun drawArm(canvas: Canvas, arm: ArmPose, scaleX: Float, scaleY: Float) {
-        drawSegment(canvas, arm.shoulder, arm.elbow, scaleX, scaleY)
-        drawSegment(canvas, arm.elbow, arm.wrist, scaleX, scaleY)
-        listOfNotNull(arm.shoulder, arm.elbow, arm.wrist)
-            .filter { it.confidence >= 0.35f }
+    private fun drawHands(canvas: Canvas, handPose: HandPose, scaleX: Float, scaleY: Float) {
+        handPose.handSegments.forEach { (a, b) ->
+            drawSegment(canvas, a, b, scaleX, scaleY)
+        }
+        handPose.hands
+            .filter { it.score >= HandPose.MIN_HAND_SCORE }
+            .flatMap { it.landmarks }
+            .filter { it.confidence >= HandPose.MIN_HAND_SCORE }
             .forEach {
-                canvas.drawCircle(it.x * scaleX, it.y * scaleY, 8f, posePaint)
+                canvas.drawCircle(it.x * scaleX, it.y * scaleY, 5f, posePaint)
             }
     }
 
-    private fun drawSegment(canvas: Canvas, a: PosePoint?, b: PosePoint?, scaleX: Float, scaleY: Float) {
-        if (a == null || b == null) return
-        if (a.confidence < 0.35f || b.confidence < 0.35f) return
+    private fun drawSegment(canvas: Canvas, a: PosePoint, b: PosePoint, scaleX: Float, scaleY: Float) {
+        if (a.confidence < HandPose.MIN_HAND_SCORE || b.confidence < HandPose.MIN_HAND_SCORE) return
         canvas.drawLine(a.x * scaleX, a.y * scaleY, b.x * scaleX, b.y * scaleY, poseLinePaint)
     }
 

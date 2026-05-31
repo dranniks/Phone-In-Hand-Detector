@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Matrix
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -21,16 +22,8 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
-import com.google.android.gms.tasks.Tasks
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.pose.Pose
-import com.google.mlkit.vision.pose.PoseDetection
-import com.google.mlkit.vision.pose.PoseDetector
-import com.google.mlkit.vision.pose.PoseLandmark
-import com.google.mlkit.vision.pose.defaults.PoseDetectorOptions
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
     private lateinit var previewView: PreviewView
@@ -44,7 +37,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var cameraExecutor: ExecutorService
 
     private var objectDetector: YoloOnnxDetector? = null
-    private var poseDetector: PoseDetector? = null
+    private var handDetector: HandLandmarkerDetector? = null
     private var bitmapBuffer: Bitmap? = null
     private var lastUiFrameTimeMs = 0L
     private var smoothFps = 0f
@@ -73,7 +66,7 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         cameraExecutor.shutdown()
         objectDetector?.close()
-        poseDetector?.close()
+        handDetector?.close()
     }
 
     private fun createContentView(): ViewGroup {
@@ -182,11 +175,7 @@ class MainActivity : ComponentActivity() {
     private fun setupModels() {
         try {
             objectDetector = YoloOnnxDetector(this)
-
-            val poseOptions = PoseDetectorOptions.Builder()
-                .setDetectorMode(PoseDetectorOptions.STREAM_MODE)
-                .build()
-            poseDetector = PoseDetection.getClient(poseOptions)
+            handDetector = HandLandmarkerDetector(this)
         } catch (error: Exception) {
             statusText.text = "Ошибка запуска"
             hintText.text = "Не удалось подготовить распознавание"
@@ -244,7 +233,7 @@ class MainActivity : ComponentActivity() {
 
             val started = System.currentTimeMillis()
             val objectResults = detector.detect(orientedBitmap)
-            val handPose = detectPose(orientedBitmap)
+            val handPose = detectHands(orientedBitmap)
             val inferenceTime = System.currentTimeMillis() - started
 
             val analysis = analyzer.analyze(
@@ -271,42 +260,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun detectPose(bitmap: Bitmap): HandPose? {
-        val detector = poseDetector ?: return null
+    private fun detectHands(bitmap: Bitmap): HandPose? {
         return try {
-            val pose = Tasks.await(
-                detector.process(InputImage.fromBitmap(bitmap, 0)),
-                POSE_TIMEOUT_MS,
-                TimeUnit.MILLISECONDS
-            )
-            pose.toHandPose()
+            handDetector?.detect(bitmap, SystemClock.uptimeMillis())
         } catch (_: Exception) {
             null
         }
-    }
-
-    private fun Pose.toHandPose(): HandPose {
-        return HandPose(
-            leftArm = ArmPose(
-                shoulder = point(PoseLandmark.LEFT_SHOULDER),
-                elbow = point(PoseLandmark.LEFT_ELBOW),
-                wrist = point(PoseLandmark.LEFT_WRIST)
-            ),
-            rightArm = ArmPose(
-                shoulder = point(PoseLandmark.RIGHT_SHOULDER),
-                elbow = point(PoseLandmark.RIGHT_ELBOW),
-                wrist = point(PoseLandmark.RIGHT_WRIST)
-            )
-        )
-    }
-
-    private fun Pose.point(type: Int): PosePoint? {
-        val landmark = getPoseLandmark(type) ?: return null
-        return PosePoint(
-            x = landmark.position.x,
-            y = landmark.position.y,
-            confidence = landmark.inFrameLikelihood
-        )
     }
 
     private fun renderStatus(analysis: PhoneAnalysis) {
@@ -386,7 +345,4 @@ class MainActivity : ComponentActivity() {
         return Bitmap.createBitmap(this, 0, 0, width, height, matrix, true)
     }
 
-    companion object {
-        private const val POSE_TIMEOUT_MS = 450L
-    }
 }
